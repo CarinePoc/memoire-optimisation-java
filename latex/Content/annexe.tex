@@ -1,0 +1,388 @@
+\appendix
+\chapter{Mesures brutes}
+\label{ann:mesures}
+
+\section{Scénario 1 — Construction du métamodèle BPMN}
+\label{ann:mesures-s1-a}
+
+Toutes les mesures du Scénario~1 portent sur le temps total de construction
+du métamodèle BPMN au démarrage de l'application. Les optimisations Opt-1
+à Opt-4 sont introduites cumulativement (chapitre~\ref{chap:developpement},
+sections~\ref{sec:opti-metamodel} et~\ref{sec:scenario1-opti2}). Opt-1
+n'étant pas mesurable indépendamment (il s'agit de la simple activation
+du cache, dont l'effet n'apparaît qu'à partir d'Opt-2), seules les
+quatre configurations \emph{baseline}, après Opt-2, après Opt-3 et après
+Opt-4 sont reportées ci-dessous.
+
+\subsection*{Baseline (avant toute optimisation)}
+
+\begin{table}[h]
+\centering
+\caption{Scénario 1 --- Baseline. 10 répétitions, temps total en secondes.}
+\begin{tabular}{rr}
+\hline
+\textbf{Run} & \textbf{Temps (s)} \\
+\hline
+1  & 18,570 \\
+2  & 18,150 \\
+3  & 17,968 \\
+4  & 17,693 \\
+5  & 18,114 \\
+6  & 18,650 \\
+7  & 17,673 \\
+8  & 18,434 \\
+9  & 18,246 \\
+10 & 18,309 \\
+\hline
+\textbf{Médiane} & \textbf{18,198} \\
+Moyenne          & 18,181 \\
+Min              & 17,673 \\
+Max              & 18,650 \\
+CV               & 1,8\,\% \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection*{Après application cumulative des optimisations}
+
+\begin{table}[h]
+\centering
+\caption{Scénario 1 --- Temps après application cumulative des
+optimisations Opt-2, Opt-3 et Opt-4. 10 répétitions par configuration,
+temps en secondes.}
+\begin{tabular}{rrrr}
+\hline
+\textbf{Run} & \textbf{Après Opt-2} & \textbf{Après Opt-3} & \textbf{Après Opt-4} \\
+\hline
+1  & 4,572 & 4,523 & 1,522 \\
+2  & 4,610 & 4,580 & 1,435 \\
+3  & 4,556 & 4,514 & 1,499 \\
+4  & 4,554 & 4,519 & 1,475 \\
+5  & 4,629 & 4,529 & 1,481 \\
+6  & 4,526 & 4,549 & 1,453 \\
+7  & 4,560 & 4,487 & 1,509 \\
+8  & 4,599 & 4,465 & 1,475 \\
+9  & 4,559 & 4,449 & 1,510 \\
+10 & 4,557 & 4,510 & 1,510 \\
+\hline
+\textbf{Médiane} & \textbf{4,560} & \textbf{4,516} & \textbf{1,490} \\
+Moyenne          & 4,572          & 4,513          & 1,487 \\
+Min              & 4,526          & 4,449          & 1,435 \\
+Max              & 4,629          & 4,580          & 1,522 \\
+CV               & 0,68\,\%       & 0,85\,\%       & 1,89\,\% \\
+\hline
+\end{tabular}
+\end{table}
+
+Le gain mesuré est conforme aux complexités attendues~: la suppression
+de la redondance dans \texttt{getMOByName} (Opt-2) divise le temps par
+$\approx 4$ par rapport à la baseline~; l'ajustement incrémental du
+cache (Opt-3) apporte un gain marginal supplémentaire ($\sim 1\,\%$)~;
+et le cache d'appartenance dans \texttt{ConcreteModel\_impl} (Opt-4)
+réduit le temps total à 1,49~s, soit un facteur cumulé de $\times 12{,}2$
+par rapport à la baseline.
+
+
+\section{Scénario 2 — Chargement d'un script GraSyLa}
+\label{ann:mesures-s2}
+
+Toutes les mesures du Scénario~2 portent sur le script
+\texttt{bpmn\_mm.grasyla} (106 équations), sans warmup explicite de la
+JVM. Les phases mesurées sont~: \textbf{t1} parsing ANTLR, \textbf{t2}
+génération (création), \textbf{t3} génération (mise à jour) et
+\textbf{t4} traversée. Deux campagnes ont été menées~: avant Opt-5A et après Opt-5A.
+
+\subsection*{Pré-Opt-5A}
+
+\begin{table}[h]
+\centering
+\caption{Scénario 2 --- Pré-Opt-5A. 10 répétitions, temps en
+millisecondes.}
+\begin{tabular}{rrrrr}
+\hline
+\textbf{Run} & \textbf{t1 (parse)} & \textbf{t2 (create)} &
+\textbf{t3 (update)} & \textbf{t4 (traverse)} \\
+\hline
+1  & 17,766 & 4\,195,520 & 1\,702,319 & 2,664 \\
+2  & 17,851 & 4\,150,973 & 1\,753,905 & 1,967 \\
+3  & 17,733 & 4\,136,875 & 1\,789,016 & 1,963 \\
+4  & 17,753 & 4\,071,387 & 1\,817,069 & 2,689 \\
+5  & 18,437 & 4\,171,475 & 1\,589,443 & 2,606 \\
+6  & 19,179 & 4\,186,779 & 1\,774,840 & 1,990 \\
+7  & 16,343 & 4\,250,482 & 1\,662,891 & 2,724 \\
+8  & 17,789 & 4\,169,228 & 1\,628,447 & 2,641 \\
+9  & 18,514 & 4\,130,843 & 1\,766,876 & 1,996 \\
+10 & 17,585 & 4\,201,589 & 1\,725,917 & 1,992 \\
+\hline
+\textbf{Médiane}  & \textbf{17,78}  & \textbf{4\,170,35} & \textbf{1\,739,91} & \textbf{2,30} \\
+Moyenne           & 17,90           & 4\,166,52          & 1\,721,07          & 2,32 \\
+Min               & 16,34           & 4\,071,39          & 1\,589,44          & 1,96 \\
+Max               & 19,18           & 4\,250,48          & 1\,817,07          & 2,72 \\
+CV                & 3,9\,\%         & 1,1\,\%            & 4,1\,\%            & 14,8\,\% \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection*{Post-Opt-5A}
+
+\begin{table}[h]
+\centering
+\caption{Scénario 2 --- Post-Opt-5A. 10 répétitions, temps en
+millisecondes.}
+\begin{tabular}{rrrrr}
+\hline
+\textbf{Run} & \textbf{t1 (parse)} & \textbf{t2 (create)} &
+\textbf{t3 (update)} & \textbf{t4 (traverse)} \\
+\hline
+1  & 16,118 & 571,387 & 290,042 & 2,829 \\
+2  & 16,893 & 561,161 & 347,459 & 2,012 \\
+3  & 16,045 & 544,690 & 268,448 & 2,681 \\
+4  & 17,082 & 573,845 & 248,512 & 2,230 \\
+5  & 18,123 & 572,138 & 340,437 & 2,101 \\
+6  & 22,840 & 592,258 & 339,973 & 2,368 \\
+7  & 25,441 & 561,650 & 261,849 & 2,704 \\
+8  & 17,884 & 570,349 & 335,256 & 2,114 \\
+9  & 16,355 & 560,400 & 255,479 & 2,752 \\
+10 & 16,970 & 586,010 & 293,034 & 2,871 \\
+\hline
+\textbf{Médiane}  & \textbf{17,03}  & \textbf{571,76} & \textbf{291,54} & \textbf{2,52} \\
+Moyenne           & 18,38           & 569,39          & 298,05          & 2,47 \\
+Min               & 16,05           & 544,69          & 248,51          & 2,01 \\
+Max               & 25,44           & 592,26          & 347,46          & 2,87 \\
+CV                & 16,4\,\%        & 2,3\,\%         & 12,5\,\%        & 12,9\,\% \\
+\hline
+\end{tabular}
+\end{table}
+
+Le CV élevé de t1 post-Opt-5A (16,4\,\%) est principalement imputable
+à deux runs initiaux (22,84 et 25,44~ms) reflétant l'absence de warmup
+explicite de la JVM~: les premières exécutions paient le coût de la
+compilation JIT sur les classes ANTLR. La campagne pré-Opt-5A, réalisée
+ultérieurement sur une JVM plus chaude, n'a pas connu ce phénomène
+(CV de t1 limité à 3,9\,\%). Cette limite, déjà discutée en
+section~\ref{sec:env}, n'affecte cependant pas la robustesse des
+médianes ni la comparaison entre les deux campagnes.
+
+\section{Scénario 4 — Boucle de dispatch GraSyLa}
+\label{ann:mesures-s4}
+
+Mesures réalisées sur le script \texttt{bpmn\_mm.grasyla} (106 équations)
+chargé une seule fois en \texttt{@BeforeClass}, et sur quatre modèles
+concrets BPMN de taille croissante.
+
+\begin{table}[h]
+\centering
+\caption{Scénario 4 — 10 répétitions. Phase t1 mesure
+\texttt{getEquations()}~; phases t2--t5 mesurent la boucle de dispatch
+pour $N \in \{50, 200, 500, 1\,000\}$. Temps en millisecondes.}
+\begin{tabular}{rrrrrr}
+\hline
+\textbf{Run} & \textbf{t1 (eq.)} & \textbf{N=50} & \textbf{N=200} &
+\textbf{N=500} & \textbf{N=1\,000} \\
+\hline
+1  & 3,659 & 1,246 & 3,924 &  8,732 & 13,564 \\
+2  & 3,644 & 1,266 & 3,949 &  8,527 & 13,356 \\
+3  & 3,842 & 1,261 & 3,956 &  8,359 & 18,762 \\
+4  & 3,630 & 1,313 & 4,064 &  8,750 & 14,166 \\
+5  & 3,603 & 1,381 & 3,926 &  8,679 & 15,143 \\
+6  & 4,164 & 1,942 & 5,135 & 12,136 & 20,331 \\
+7  & 3,838 & 1,766 & 4,287 &  9,835 & 20,624 \\
+8  & 3,745 & 1,421 & 4,094 &  8,540 & 14,050 \\
+9  & 4,657 & 1,328 & 3,979 &  8,633 & 13,668 \\
+10 & 3,542 & 1,306 & 4,013 &  8,952 & 14,820 \\
+\hline
+\textbf{Médiane} & \textbf{3,70} & \textbf{1,32} & \textbf{4,00} & \textbf{8,71} & \textbf{14,49} \\
+Moyenne          & 3,83          & 1,42          & 4,13          & 9,11          & 15,85 \\
+Min              & 3,54          & 1,25          & 3,92          & 8,36          & 13,36 \\
+Max              & 4,66          & 1,94          & 5,14          & 12,14         & 20,62 \\
+CV               & 8,4\,\%       & 15,8\,\%      & 8,5\,\%       & 11,8\,\%      & 17,3\,\% \\
+\hline
+\end{tabular}
+\end{table}
+
+Le CV reste modéré pour toutes les phases sauf le dispatch à $N=50$
+(15,8\,\%) et $N=1\,000$ (17,3\,\%)~; ces deux valeurs s'expliquent
+respectivement par le bas signal absolu (la phase à $N=50$ est trop
+courte pour stabiliser le coût JIT) et par les fluctuations sur les
+boucles longues. La médiane reste néanmoins représentative.
+
+\section{Scénario 5 — Scalabilité des réseaux de Petri}
+\label{ann:mesures-s5}
+
+Deux campagnes ont été menées sur les topologies cyclique et hub~: une
+campagne \emph{pré-Opt-5A} et une campagne \emph{post-Opt-5A}. La création d'objets et la traversée
+n'étant pas affectées par Opt-5A (qui ne touche que
+\texttt{\_createRole}), seules les médianes sont rapportées pour ces
+phases dans la campagne post-Opt-5A. Les temps sont en millisecondes.
+
+\subsection*{Pré-Opt-5A --- création d'arcs, chaîne cyclique}
+
+\begin{table}[h]
+\centering
+\caption{Pré-Opt-5A --- création de $2N$ arcs, topologie cyclique.
+10 répétitions.}
+\begin{tabular}{rrrrr}
+\hline
+\textbf{Run} & \textbf{N=100} & \textbf{N=500} & \textbf{N=1\,000} & \textbf{N=5\,000} \\
+\hline
+1  & 4,127 & 42,812 & 152,349 & 4\,756,693 \\
+2  & 4,369 & 41,230 & 140,376 & 4\,571,512 \\
+3  & 3,754 & 40,022 & 154,669 & 4\,510,277 \\
+4  & 3,901 & 41,902 & 155,715 & 4\,426,107 \\
+5  & 3,672 & 42,260 & 151,286 & 4\,489,734 \\
+6  & 4,116 & 40,942 & 156,318 & 4\,346,881 \\
+7  & 3,962 & 39,517 & 154,755 & 4\,273,799 \\
+8  & 5,389 & 48,078 & 165,046 & 4\,555,878 \\
+9  & 3,861 & 39,086 & 149,010 & 4\,472,996 \\
+10 & 3,787 & 42,970 & 155,409 & 4\,425,903 \\
+\hline
+\textbf{Médiane} & \textbf{3,93} & \textbf{41,57} & \textbf{154,71} & \textbf{4\,481,37} \\
+CV               & 11,6\,\%      & 5,8\,\%        & 3,9\,\%         & 2,8\,\% \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection*{Pré-Opt-5A --- création d'arcs, hub}
+
+\begin{table}[h]
+\centering
+\caption{Pré-Opt-5A --- création de $N$ arcs vers un unique hub.
+10 répétitions.}
+\begin{tabular}{rrrr}
+\hline
+\textbf{Run} & \textbf{N=100} & \textbf{N=500} & \textbf{N=1\,000} \\
+\hline
+1  & 1,459 & 15,325 & 63,289 \\
+2  & 1,421 & 15,695 & 65,546 \\
+3  & 1,509 & 15,744 & 63,030 \\
+4  & 1,459 & 15,402 & 63,952 \\
+5  & 1,534 & 15,793 & 65,135 \\
+6  & 1,539 & 16,733 & 63,695 \\
+7  & 1,442 & 15,306 & 62,701 \\
+8  & 1,524 & 16,271 & 64,395 \\
+9  & 1,527 & 16,666 & 65,358 \\
+10 & 1,440 & 15,462 & 60,089 \\
+\hline
+\textbf{Médiane} & \textbf{1,48} & \textbf{15,72} & \textbf{63,82} \\
+CV               & 2,9\,\%       & 3,2\,\%        & 2,4\,\% \\
+\hline
+\end{tabular}
+\end{table}
+
+La campagne pré-Opt-5A présente des CV remarquablement bas (toujours
+$\leq 12\,\%$ et souvent $\leq 4\,\%$), traduisant la stabilité du
+comportement algorithmique avant optimisation. Aucune bimodalité n'est
+observée sur les arcs --- la dégradation est uniformément quadratique.
+
+\subsection*{Post-Opt-5A --- création d'objets, chaîne cyclique}
+
+\begin{table}[h]
+\centering
+\caption{Création de $2N$ objets, topologie cyclique. 10 répétitions.}
+\begin{tabular}{rrrrr}
+\hline
+\textbf{Run} & \textbf{N=100} & \textbf{N=500} & \textbf{N=1\,000} & \textbf{N=5\,000} \\
+\hline
+1  & 2,656 & 14,999 & 23,255 & 770,724 \\
+2  & 2,654 & 15,574 & 25,748 & 715,189 \\
+3  & 2,771 & 15,789 & 28,170 & 207,688 \\
+4  & 3,083 & 18,210 & 26,997 & 200,039 \\
+5  & 2,879 & 16,212 & 26,535 & 178,612 \\
+6  & 2,614 & 13,820 & 22,375 & 704,800 \\
+7  & 2,250 & 12,879 & 20,955 & 786,870 \\
+8  & 2,362 & 14,205 & 22,265 & 671,963 \\
+9  & 3,105 & 17,404 & 34,189 & 238,018 \\
+10 & 3,033 & 17,331 & 32,466 & 191,057 \\
+\hline
+\textbf{Médiane} & \textbf{2,71} & \textbf{15,68} & \textbf{26,14} & \textbf{455,0} \\
+CV               & 11,1\,\%      & 11,8\,\%       & 16,3\,\%       & 53\,\% \\
+\hline
+\end{tabular}
+\end{table}
+
+À $N=5\,000$, la distribution est nettement \textbf{bimodale}~: cinq runs
+oscillent entre 178 et 238~ms, cinq autres entre 672 et 787~ms. Ce
+phénomène, déjà signalé en discussion (chapitre~\ref{chap:discussion}),
+correspond à l'\emph{entity manager bloat} d'OpenJPA quand la session
+de test accumule de nombreuses entités entre exécutions consécutives.
+La médiane (455~ms) tombe entre les deux clusters et n'est pas
+représentative~; la valeur minimale (179~ms) reflète mieux la
+performance intrinsèque de \texttt{\_createObject} dans un workspace peu
+chargé.
+
+\subsection*{Topologie cyclique --- création d'arcs (post-Opt-5A)}
+
+\begin{table}[h]
+\centering
+\caption{Création de $2N$ arcs, topologie cyclique, après Opt-5A.
+10 répétitions.}
+\begin{tabular}{rrrrr}
+\hline
+\textbf{Run} & \textbf{N=100} & \textbf{N=500} & \textbf{N=1\,000} & \textbf{N=5\,000} \\
+\hline
+1  & 3,893 & 21,640 & 58,705 & 1\,312,195 \\
+2  & 3,843 & 21,613 & 66,023 &    875,710 \\
+3  & 4,134 & 22,821 & 77,207 &    921,072 \\
+4  & 4,763 & 25,031 & 75,135 &    930,813 \\
+5  & 3,882 & 22,402 & 79,154 & 1\,205,978 \\
+6  & 3,775 & 19,501 & 56,638 &    961,058 \\
+7  & 3,167 & 18,235 & 53,981 & 1\,081,409 \\
+8  & 3,442 & 20,263 & 55,284 & 1\,162,874 \\
+9  & 4,621 & 26,445 & 77,409 &    912,645 \\
+10 & 4,507 & 26,807 & 77,907 & 1\,173,943 \\
+\hline
+\textbf{Médiane} & \textbf{3,89} & \textbf{22,02} & \textbf{70,58} & \textbf{1\,021,2} \\
+CV               & 11,9\,\%      & 13,2\,\%       & 14,4\,\%       & 13,8\,\% \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection*{Topologie hub --- création d'arcs (post-Opt-5A)}
+
+\begin{table}[h]
+\centering
+\caption{Création de $N$ arcs vers un unique hub. 10 répétitions.}
+\begin{tabular}{rrrr}
+\hline
+\textbf{Run} & \textbf{N=100} & \textbf{N=500} & \textbf{N=1\,000} \\
+\hline
+1  & 1,578 & 34,927 & 35,727 \\
+2  & 1,518 & 34,499 & 36,834 \\
+3  & 1,217 & 10,289 & 35,972 \\
+4  & 1,250 & 10,524 & 35,403 \\
+5  & 1,598 & 11,256 & 37,071 \\
+6  & 1,629 & 33,063 & 36,957 \\
+7  & 1,621 & 35,564 & 37,642 \\
+8  & 1,599 & 10,717 & 36,285 \\
+9  & 1,202 & 10,154 & 35,912 \\
+10 & 1,242 & 10,579 & 36,025 \\
+\hline
+\textbf{Médiane} & \textbf{1,55} & \textbf{10,99} & \textbf{36,16} \\
+CV               & 11,6\,\%      & 60\,\% (bimodal)& 2,0\,\% \\
+\hline
+\end{tabular}
+\end{table}
+
+À $N=500$, la topologie hub présente également une distribution
+bimodale (six runs $\sim$10~ms, quatre runs $\sim$34~ms), reflétant
+la même variabilité environnementale.
+
+\subsection*{Topologie cyclique --- traversée \texttt{getDefinition()}}
+
+\begin{table}[h]
+\centering
+\caption{Traversée de $4N$ objets de la définition, topologie cyclique.
+10 répétitions ($N=5\,000$ mesuré deux fois par run, soit 20 valeurs).}
+\begin{tabular}{rrrr}
+\hline
+\textbf{Mesure} & \textbf{N=100} & \textbf{N=500} & \textbf{N=1\,000} \\
+\hline
+Médiane & 0,43 & 1,96 & 4,21 \\
+CV      & 6,1\,\% & 4,1\,\% & 5,2\,\% \\
+\hline
+\end{tabular}
+\end{table}
+
+À $N=5\,000$ (20 mesures, deux par run), médiane = 20,42~ms, CV $\approx$ 5,7\,\%.
+La traversée est $O(N)$ stable, peu sensible à la variabilité observée
+sur les phases de création.

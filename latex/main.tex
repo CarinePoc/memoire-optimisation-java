@@ -1,0 +1,121 @@
+\documentclass[a4paper,11pt]{book}
+
+
+% Package definition
+\usepackage[T1]{fontenc}
+\usepackage[sfdefault]{atkinson} %% usage de la police Atkinson Hypereligible
+\usepackage[scaled=0.85]{beramono} %% pour \texttt
+\usepackage{graphicx, subcaption}
+\usepackage{setspace}
+\usepackage{fancybox}
+\usepackage{tikz}
+\usepackage{fancyhdr}
+\usepackage{pifont}
+\usepackage{lipsum} % génère du texte aléatoire
+% \usepackage{draftwatermark}
+% \SetWatermarkText{CONFIDENTIEL}
+% \SetWatermarkColor{gray!20}
+% \SetWatermarkFontSize{3cm}
+\usepackage[top=2cm, bottom=2.5cm, left=2cm, right=2cm]{geometry} % marge des pages
+\usepackage{ragged2e} % justifier texte
+\usepackage[french]{babel} 
+\usepackage{microtype} %% pour améliorer la typographie, facultatif.
+
+\usepackage{xcolor}
+\usepackage{hyperref} %% pour \url avec hyperlien
+\usepackage{listings} %% To insert code (Java, Python, etc)
+\usepackage[linesnumbered,ruled,vlined]{algorithm2e} %% Pseudo-code
+
+% ----- AJOUT 
+\usepackage[htt]{hyphenat}
+\usepackage{microtype}
+\usepackage{wrapfig}
+\usepackage{tabularx}
+ \usepackage{amsmath}
+%\let\cleardoublepage\clearpage
+% -----
+
+
+%\pagestyle{fancy} % Activer le style fancy
+\renewcommand{\headrulewidth}{0pt} % Retrait header
+\renewcommand{\familydefault}{\sfdefault}
+
+\newcommand{\titreMemoire}{Analyse empirique et optimisation algorithmique d'un outil de métamodélisation MetaDONE} 
+
+\newcommand{\auteurMemoire}{Carine POCHET}
+
+\newcommand{\diplome}{\textbf\textit{{Décommenter la ligne de redéfinition de la commande \texttt{diplome}}}}
+%% MASTER 60
+%\renewcommand{\diplome}{Mémoire présenté en vue de l'obtention du grade de Master 60 en Sciences Informatiques}
+%% MASTER 120
+\renewcommand{\diplome}{Mémoire présenté en vue de l'obtention du grade de Master 120 en Sciences Informatiques}
+
+\newcommand{\anneeacademique}{2025-2026}
+
+\newcommand{\promoteur}{Prof. Vincent ENGLEBERT}
+%% laisser vide si pas de co-promoteur
+\newcommand{\copromoteur}{} 
+
+
+\input{configListing} %configuration pour les listings
+
+\setlength{\headheight}{13.59999pt}
+\setlength{\emergencystretch}{2em} % autorise plus de souplesse pour éviter les débordements de marge
+
+
+\begin{document}
+
+\input{couverture}
+\thispagestyle{empty}
+
+\justifying
+
+\clearpage
+\input{Content/remerciements}
+
+\clearpage
+\input{Content/resume}
+
+\tableofcontents
+
+\clearpage
+\input{Content/acronymes}
+
+\renewcommand{\headrulewidth}{1pt} % Retrait header
+
+\pagestyle{fancy}
+
+\input{Content/introduction}
+\input{Content/etat_art}
+\input{Content/architecture}
+
+\input{Content/methodologie}
+\chapter{Développement}
+\label{chap:developpement}
+\input{Content/scenario-1}
+\input{Content/scenario-1a}
+\input{Content/scenario-1b}
+
+\input{Content/scenario-2}
+\input{Content/scenario-3}
+\input{Content/scenario-5}
+
+
+\input{Content/discussion}
+\input{Content/conclusion}
+
+
+%\chapter{ Bibliographie ou Références}
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{biblio}
+
+
+\part*{Annexes}
+%\addcontentsline{toc}{part}{Annexes}
+ 
+\input{Content/annexe}
+
+\clearpage
+\input{Content/charte_ia}
+
+\end{document}

@@ -1,0 +1,153 @@
+\chapter{Conclusion}
+\label{chap:conclusion}
+
+% ----------------------------------------------------------------
+\section{Bilan de la recherche}
+
+Ce mémoire s'est donné pour objectif d'identifier, de mesurer et de réduire les
+goulots de performance de MetaDONE, un outil MetaCASE bâti sur l'architecture
+MetaL$_2$ et reposant sur une couche de persistance JPA. La démarche adoptée a
+suivi un cycle empirique complet pour chacun des quatre scénarios étudiés~:
+conception d'un benchmark instrumenté, mesure de référence, identification de
+la cause racine dans le code source, conception et implémentation d'une
+optimisation, vérification expérimentale du gain.
+
+Cette méthodologie a guidé toutes les décisions techniques, y compris les
+décisions négatives. Sur les quatre optimisations candidates initialement
+identifiées, deux ont été \emph{rejetées} sur la base des mesures~:
+la candidate \og batch-JPA \fg{} (activation du paramètre \texttt{batchLimit}),
+sans effet sur une base H2 embarquée, et la candidate \og bypass-précondition \fg{}
+(introduction d'une méthode \texttt{createRoleTrusted} contournant
+\texttt{precondition\_createRole}), incompatible avec le principe Design by
+Contract structurant l'architecture de MetaDONE. %Ces refus documentés délimitent l'espace des solutions acceptables et constituent à part entière un résultat de la recherche.
+
+% ----------------------------------------------------------------
+\section{Contribution}
+
+La contribution technique principale de ce travail se résume en deux
+optimisations algorithmiques implémentées et validées.
+
+L'optimisation du Scénario~1 introduit un cache \texttt{WeakHashMap} dans
+\texttt{ConcreteModel\_impl.\_isInDefinition}, éliminant un scan linéaire
+répété de la liste de définition. La complexité de \texttt{getMOByName} passe
+de $O(N^2)$ à $O(N)$.
+
+L'optimisation Opt-5A du Scénario~5 corrige une asymétrie non documentée entre
+\texttt{\_createObject} (insertion directe en $O(1)$) et \texttt{\_createRole}
+(passage par un scan en $O(\text{taille\_du\_modèle})$). En quatre lignes
+modifiées, la création d'arcs passe de $O(N^2)$ à un plancher proche de
+$O(N \log N)$ pour les topologies à degré borné, avec un gain médian de
+$2{,}19\times$ à $N = 1\,000$ et $4{,}39\times$ à $N = 5\,000$ (mesuré sur
+10 répétitions par campagne). La borne résiduelle correspond au plancher inhérent à tout
+backend de persistance indexé.
+
+Au-delà des chiffres, ce travail dégage trois enseignements généralisables.
+Premièrement, les bottlenecks les plus impactants ne se trouvent pas
+toujours là où l'intuition les place : la mise en évidence de la complexité
+$O(N^2)$ de \texttt{\_createRole} n'a été possible qu'en comparant deux
+topologies dont l'une infirmait l'hypothèse initiale. Deuxièmement, dans
+un système à garanties formelles, les optimisations les plus sûres sont celles
+qui \emph{exploitent} les invariants plutôt que celles qui les contournent~:
+l'opposition entre la candidate \og bypass-précondition \fg{} (rejetée) et
+Opt-5A (retenue) en est l'illustration.
+Troisièmement, l'explicitation des hypothèses simplificatrices — ici,
+l'exclusion délibérée de l'optimisation du schéma JPA — est essentielle à
+l'interprétation correcte des résultats.
+
+% ----------------------------------------------------------------
+\section{Limites du travail et points de vigilance}
+
+Plusieurs limites doivent être signalées pour délimiter la portée des résultats présentés.
+
+\paragraph{Périmètre instrumenté.}
+Les benchmarks ont été réalisés en mode standalone JUnit, hors du contexte
+Eclipse RCP. Si ce choix offre une excellente contrôlabilité pour les couches
+métier et repository (Scénarios 1, 2 et 5), il a empêché de mesurer
+directement l'étape~3 du pipeline de visualisation (évaluation des expressions
+GraSyLa). Cette limite a été compensée a posteriori par un profilage live de
+l'application Eclipse via async-profiler (Section~\ref{sec:sc4-live}), mais
+les deux types de mesures ne sont pas strictement comparables et la
+quantification reste indirecte.
+
+\paragraph{Biais d'accumulation JPA.}
+La base de test étant partagée entre exécutions, la session OpenJPA accumule
+des entités au fil des scénarios. Ce phénomène (\emph{entity manager bloat}) a
+été observé à $N = 5\,000$ en S5 et a légèrement biaisé les valeurs absolues
+mesurées. Les comparaisons relatives avant/après optimisation restent valides,
+mais les valeurs absolues à grand $N$ doivent être interprétées avec
+prudence. Une réexécution sur base fraîche pour chaque scénario améliorerait
+la fiabilité des chiffres absolus.
+
+\paragraph{Hypothèse simplificatrice sur la persistance.}
+L'optimisation du schéma JPA et des index SQL a été explicitement exclue du
+périmètre. Cette exclusion, motivée par la portée architecturale d'une telle
+modification, signifie que le plancher proche de $O(N \log N)$ observé en S5
+après Opt-5A reflète une contrainte du backend (mise à jour d'index B-tree à
+chaque INSERT) non remise en cause dans ce travail.
+
+\paragraph{Si c'était à refaire.}
+Avec le recul, deux choix méthodologiques mériteraient d'être révisés. D'une
+part, le profilage live aurait dû être réalisé plus tôt dans le processus :
+les 11~\% de coût attribués à \texttt{getEquations}/\texttt{hasType} en
+contexte interactif (contre $\sim 0\,\%$ en standalone) n'ont été révélés
+qu'en fin de travail et auraient pu orienter différemment les priorités.
+D'autre part, l'effort consacré à l'évaluation des candidates batch-JPA et
+bypass-précondition (finalement rejetées) aurait pu être mieux dimensionné
+avec une lecture préalable plus attentive de la configuration H2 et du
+contrat DbC.
+Ces deux constats relèvent toutefois davantage d'un apprentissage que d'une
+remise en cause de la démarche d'ensemble.
+
+% ----------------------------------------------------------------
+\section{Pistes non explorées et perspectives}
+
+Plusieurs pistes de réflexion identifiées au cours du travail n'ont pu être
+développées, soit par manque de temps, soit par dépassement du périmètre
+défini. Elles méritent toutefois d'être signalées pour orienter des travaux
+ultérieurs.
+
+\paragraph{Mise en cache de \texttt{getEquations()} — court terme.}
+Le profilage live a mesuré que cette méthode représente 11,16~\% du temps CPU
+en contexte interactif, car elle reconstruit l'intégralité des 106 wrappers
+\texttt{GrasylaEquation} à chaque cycle de rendu. Un mécanisme de cache
+volatile invalidé par \texttt{notifyScriptChanged()} suffirait à éliminer ce
+surcoût en quelques lignes de code. C'est la piste au rapport gain/effort le
+plus favorable parmi celles identifiées.
+
+\paragraph{Index de précondition pour \texttt{MANY\_TO\_MANY} — moyen terme.}
+Le bottleneck résiduel identifié en S5 pour les topologies à fort degré
+(complexité $O(N^2)$ due à la vérification de l'unicité des paires) pourrait
+être corrigé par un index $\texttt{Map<MetaRole, Map<K\_Object,
+Set<K\_Object>>>}$ maintenu dans \texttt{ConcreteModel\_impl}. L'implémentation
+requiert une gestion de cohérence à la suppression et une initialisation
+\emph{lazy} pour les modèles chargés.
+
+\paragraph{Optimisation de la couche de persistance — long terme.}
+L'introduction d'index composites SQL sur \texttt{(Property\_domain,
+Property\_type)} convertirait certains scans $O(\text{degré})$ en $O(\log N)$.
+Cette piste relève cependant d'un projet à part entière, interagissant avec
+l'ensemble des backends supportés. Le promoteur a souligné que, dans le scope
+de ce mémoire, l'option ORM/SQL restant la voie de persistance par défaut,
+l'optimisation de la base de données constituera \emph{une étape inévitable}
+pour tout travail ultérieur visant un passage à l'échelle significatif.
+
+\paragraph{Reconstruction incrémentale de la scène GraSyLa.}
+Le profilage live a révélé que les $\approx 53\,\%$ de temps CPU passés dans la
+boucle \texttt{trigger}~$\rightarrow$~\texttt{buildComponent}~$\rightarrow$~%
+\texttt{evaluateComponent} proviennent d'une reconstruction \emph{globale} de
+la scène à chaque modification du modèle. Une stratégie de reconstruction
+incrémentale, ciblée sur les seuls composants affectés, semble la piste à plus
+fort potentiel pour les améliorations futures de l'interface graphique.
+
+% ----------------------------------------------------------------
+\section*{}
+
+MetaDONE est un outil dont l'architecture privilégie l'extensibilité, la
+généricité et la correction formelle ; cette généricité a un coût, qu'aucune
+optimisation locale ne peut entièrement effacer. Le travail présenté ici ne
+prétend pas refonder cette architecture, mais en améliorer le comportement
+empirique aux points où une analyse rigoureuse révèle une marge d'amélioration
+réelle. Les deux optimisations retenues — toutes deux locales, peu invasives,
+et préservant intégralement les garanties du Design by Contract — démontrent
+qu'un gain substantiel de performance est compatible avec le respect des
+principes architecturaux fondateurs de l'outil.

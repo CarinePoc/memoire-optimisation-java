@@ -1,0 +1,104 @@
+\chapter{Discussion}
+\label{chap:discussion}
+
+% ----------------------------------------------------------------
+\section{Synthèse des résultats}
+
+Les scénarios réalisés couvrent quatre axes du comportement de MetaDONE~: la construction de métamodèles (S1), le chargement de scripts GraSyLa (S2), la boucle de dispatch de visualisation (S4) et la scalabilité de la création de modèles concrets (S5). Deux optimisations ont été implémentées et validées~; deux candidates ont été écartées pour des raisons distinctes. Le Tableau~\ref{tab:disc-bilan} synthétise l'ensemble des décisions.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Bilan des optimisations étudiées}
+\label{tab:disc-bilan}
+\begin{tabular}{p{2.5cm}p{4.8cm}p{2.4cm}p{3cm}}
+\hline
+\textbf{Scénario} & \textbf{Problème identifié} & \textbf{Décision} & \textbf{Résultat} \\
+\hline
+S1 & \texttt{\_isInDefinition} $O(N^2)$ dans \texttt{getMOByName} &
+   Implémenté (\texttt{WeakHashMap}) & $O(N^2) \rightarrow O(N)$ \\[4pt]
+S2 --- candidate batch-JPA & Batch JPA (\texttt{batchLimit}) &
+   Écartée & Aucun effet sur H2 local \\[4pt]
+S2 --- candidate bypass-précondition & Bypass de \texttt{precondition\_createRole} &
+   Écartée & Violation DbC \\[4pt]
+S4 & Dispatch $O(N \times M \times K)$ &
+   Non implémenté & Déjà efficace à l'échelle réelle \\[4pt]
+S5 --- Opt-5A & \texttt{\_createRole} $O(N^2)$ via \texttt{\_addInDefinition} &
+   Implémenté & $O(N^2) \rightarrow$ plancher $\sim O(N \log N)$ \\
+\hline
+\end{tabular}
+\end{table}
+
+Les deux optimisations retenues partagent un même schéma : elles éliminent un scan systématiquement redondant par analyse statique des invariants du programme. Dans les deux cas, la correction est locale (quelques lignes), non invasive pour le reste de l'API, et préserve intégralement les garanties Design by Contract. Ce pattern — identifier un scan $O(N)$ appelé $O(N)$ fois par invariant toujours vrai — constitue la contribution technique principale de ce travail.
+
+% ----------------------------------------------------------------
+\section{Deux patterns d'optimisation distincts}
+
+L'analyse des scénarios fait émerger deux familles de problèmes de performance dans MetaDONE.
+
+\paragraph{Structures de données inadaptées à leur usage.}
+La première famille correspond à l'utilisation d'une collection linéaire là où un dictionnaire serait approprié. C'est le cas du Scénario~1, où \texttt{\_isInDefinition} itérait la liste de définition du modèle à chaque appel alors qu'un \texttt{WeakHashMap} fournit la même information en $O(1)$. Cette famille de problèmes est classique en ingénierie logicielle et sa correction est généralement peu risquée.
+
+\paragraph{Asymétries de conception non documentées.}
+La seconde famille est plus subtile : deux méthodes apparentées adoptent des stratégies d'insertion divergentes sans justification fonctionnelle visible. En Scénario~5, \texttt{\_createObject} contournait \texttt{\_addInDefinition} par une insertion directe ($O(1)$), tandis que \texttt{\_createRole} passait par la vérification complète ($O(N)$). Ce type de divergence silencieuse est difficile à détecter par revue de code seule. Il a fallu un benchmark avec deux topologies — dont l'une invalide l'hypothèse initiale (la chaîne cyclique, supposée $O(N)$, présentant le même $O(N^2)$ que le hub) — pour localiser la cause racine. Ce résultat illustre la valeur des benchmarks paramétriques comme outil de diagnostic, au-delà du simple profilage.
+
+% ----------------------------------------------------------------
+\section{Le Design by Contract comme contrainte architecturale}
+
+Le rejet de la \textbf{candidate bypass-précondition} (section~\ref{sec:scenario2-precondition-rejet}) mérite une discussion particulière. La proposition consistait à introduire une méthode \texttt{createRoleTrusted} court-circuitant \texttt{precondition\_createRole} pour les appelants ayant préalablement vérifié les contraintes de cardinalité. Bien que le gain de performance fût plausible --- la précondition représentait une fraction non négligeable du temps de chargement d'un script BPMN --- cette option a été écartée pour violation du principe Design by Contract (DbC) sur lequel repose l'architecture de MetaDONE.
+
+Ce choix révèle une tension structurelle entre performance et correction par construction. Dans MetaDONE, les préconditions ne sont pas de simples validations défensives optionnelles : elles constituent la formalisation des invariants du métamodèle (cardinalités, unicité des rôles, appartenance au modèle). Les lever sélectivement, même dans un contexte maîtrisé, fragilise le modèle de confiance que le DbC instaure entre les couches de l'architecture.
+
+L'optimisation correcte — comme le montre Opt-5A — consiste à démontrer qu'un invariant \emph{plus fort} que la précondition est déjà garanti par le contexte d'appel (un objet fraîchement créé ne peut pas être dans la définition), et à exploiter cet invariant plutôt qu'à supprimer la vérification. Cette leçon est généralisable : dans un système à fortes garanties formelles, les optimisations les plus sûres sont celles qui raisonnent \emph{sur} les invariants plutôt que celles qui les contournent.
+
+% ----------------------------------------------------------------
+\section{Hypothèse simplificatrice : la persistance JPA/H2}
+\label{sec:disc-jpa}
+
+Ce travail exclut explicitement l'optimisation de la couche de persistance — schéma JPA, configuration H2, indexation des tables. Cette exclusion constitue une hypothèse simplificatrice dont les implications doivent être discutées.
+
+\subsection*{Ce que cette hypothèse implique pour les mesures}
+
+Toutes les durées mesurées incluent le coût des opérations JPA dans leur configuration actuelle. En particulier, les collections \texttt{Object\_domainOf} et \texttt{Object\_rangeOf} sont des \texttt{LinkedList<K\_Property>} chargées en mémoire par OpenJPA et parcourues séquentiellement. Si ces parcours passaient par des requêtes JPQL exploitant des index composites \texttt{(Property\_domain, Property\_type)} et \texttt{(Property\_range, Property\_type)}, le coût de chaque accès filtré serait $O(\log N)$ au lieu de $O(\text{degré\_total})$.
+
+Le plancher résiduel observé après Opt-5A pour la chaîne cyclique (entre $O(N \log N)$ et $O(N^2)$ selon les mesures) est, lui, inhérent à tout système de stockage persistant indexé~: chaque INSERT met à jour un B-tree dont la hauteur croît comme $\log N$. La contribution mesurable au-delà de $O(N \log N)$ est imputable à l'\emph{entity manager bloat} d'OpenJPA (discuté à la section~\ref{sec:validite-mesures}) et n'est pas une limitation propre à l'algorithmique de MetaDONE.
+
+\subsection*{Justification du choix}
+
+Trois raisons motivent cette exclusion. Premièrement, le schéma JPA de MetaDONE — modèle universel à deux tables (\texttt{K\_Object} et \texttt{K\_Property}) — est une décision architecturale fondamentale qui conditionne l'extensibilité du système ; toute modification du schéma interagirait avec l'ensemble des backends supportés (JPA2, ObjectDB). Deuxièmement, les gains réalisables par optimisation de l'algorithmique Java — $O(N^2) \rightarrow O(N \log N)$ en S5, $O(N^2) \rightarrow O(N)$ en S1 — sont d'un ordre de grandeur supérieur à ce qu'une indexation SQL pourrait apporter à elle seule. Troisièmement, les optimisations implémentées opèrent en mémoire et restent valides quelle que soit la configuration du backend de persistance.
+
+\subsection*{Pistes d'optimisation base de données}
+
+À titre de perspective, une ligne de travail naturelle consisterait à remplacer les parcours de \texttt{getDomainOf(theMetaRole)} filtrés par type — utilisés notamment dans \texttt{precondition\_createRole} \texttt{MANY\_TO\_MANY} — par des requêtes JPQL paramétrées avec index. Cela convertirait le bottleneck résiduel du hub ($O(N^2)$) en $O(N \log N)$, au prix de modifications dans la couche repository. Ce travail sort du périmètre du présent mémoire mais représente la suite logique des optimisations ici entreprises.
+
+% ----------------------------------------------------------------
+\section{Validité des mesures et contexte d'exécution}
+\label{sec:validite-mesures}
+
+Les benchmarks ont été réalisés en mode standalone JUnit, en dehors du contexte Eclipse RCP et de son thread UI. Ce choix présente un compromis entre contrôlabilité et représentativité.
+
+\subsection*{Avantages}
+
+L'environnement standalone est reproductible, isolé des artefacts de rendu Eclipse, et permet de mesurer précisément les couches métier (\texttt{metabusiness}, repository JPA) sans bruit d'interface graphique. Il est particulièrement adapté aux scénarios S1, S2 et S5, qui portent sur des opérations de modélisation (création d'objets, de rôles, chargement de scripts).
+
+\subsection*{Limites}
+
+Le benchmark standalone du Scénario~4 ne couvre que les étapes 1 et 2 du pipeline de rendu GraSyLa (récupération des équations, évaluation de \texttt{hasType()}). L'étape~3 --- évaluation de l'arbre d'expression (appels JavaScript via Rhino, accès aux propriétés du modèle pour calculer couleurs, positions, étiquettes) --- requiert la couche Eclipse UI et n'est pas isolable dans un test JUnit. Pour combler ce manque, une session de profilage live de l'application Eclipse complète a été réalisée et présentée à la section~\ref{sec:sc4-live}~: elle quantifie le poids effectif des trois étapes en contexte interactif réel. Les deux types de mesures (standalone et live) reposent toutefois sur des protocoles distincts et ne sont pas strictement comparables~; la quantification de l'étape~3 reste donc indirecte et doit être lue comme un ordre de grandeur.
+
+Par ailleurs, les benchmarks utilisent un projet de test partagé par l'ensemble des scénarios (\texttt{TestWorkspace} singleton, base H2 persistante). La croissance de la session JPA entre les exécutions introduit un biais sur les mesures à grand $N$, comme l'illustre la dégradation de la création d'objets à $N = 5\,000$ entre la mesure avant et après Opt-5A. Ce phénomène, connu sous le terme d'\emph{entity manager bloat}, est une limite documentée des benchmarks intégrés sur longue durée. Pour des mesures absolues plus fiables, chaque scénario devrait être exécuté sur une base fraîche.
+
+Enfin, aucune phase de \textit{warmup} de la JVM n'a été instaurée avant les mesures. La compilation JIT du HotSpot peut rendre les premières exécutions d'une méthode chaude significativement plus lentes que son régime stabilisé. Trois éléments permettent toutefois de conclure que cette limite n'invalide pas les ordres de grandeur des gains observés. \emph{Premièrement}, la médiane sur 10 répétitions absorbe naturellement les valeurs aberrantes des premières exécutions liées à la compilation initiale~: avec 10 mesures, jusqu'à 4 valeurs hautes peuvent être ignorées sans biais. \emph{Deuxièmement}, les coefficients de variation rapportés sont faibles sur la majorité des scénarios (typiquement $< 6\,\%$ pour les phases de traversée et les mesures à $N \leq 1\,000$), ce qui constitue une preuve empirique de la stabilisation du régime d'exécution. \emph{Troisièmement}, les gains des deux optimisations retenues (Opt-1 et Opt-5A) sont d'ampleur suffisante --- respectivement passage de $O(N^2)$ à $O(N)$, et facteur $\times 4{,}39$ à $N = 5\,000$ --- pour qu'un éventuel biais de JIT (de l'ordre de quelques pourcents sur les premières mesures) ne puisse inverser ni masquer la tendance. En revanche, pour des comparaisons fines entre micro-optimisations dont l'amplitude attendue serait inférieure à $20\,\%$, une procédure formelle de warmup --- par exemple via JMH ou en suivant les recommandations méthodologiques de \cite{georges2007statistically} --- deviendrait indispensable.
+
+% ----------------------------------------------------------------
+\section{Perspectives}
+
+\paragraph{À court terme — mise en cache de \texttt{getEquations()}.}
+La méthode \texttt{GrasylaScript.getEquations()} reconstruit l'intégralité des wrappers \texttt{GrasylaEquation} depuis JPA à chaque appel (coût médian mesuré en S4 : 3,70~ms pour 106 équations sur 10 répétitions). Dans une boucle de rendu à 30 images par seconde, ce surcoût fixe représente $\sim$\,111~ms/s, indépendamment de la taille du modèle. Un mécanisme d'invalidation existe déjà via \texttt{notifyScriptChanged()} ; l'ajout d'un champ \texttt{volatile} mis à \texttt{null} lors de chaque notification suffirait à éliminer ce coût. Il s'agit de l'optimisation à plus fort rapport gain/effort parmi celles identifiées mais non implémentées dans ce travail.
+
+\paragraph{À moyen terme — index de précondition pour les n\oe{}uds à fort degré.}
+Le bottleneck résiduel identifié en S5 pour la topologie hub ($O(N^2)$, dû à la précondition \texttt{MANY\_TO\_MANY}) pourrait être corrigé par un index \texttt{Map<MetaRole, Map<K\_Object, Set<K\_Object>>>} maintenu dans \texttt{ConcreteModel\_impl}, ramenant la vérification de $O(\text{degré})$ à $O(1)$. L'implémentation requiert une gestion de cohérence à la suppression de rôles et une initialisation \emph{lazy} pour les modèles chargés depuis la base. Ce travail s'appuie directement sur l'analyse menée en S5 et constitue un prolongement naturel d'Opt-5A.
+
+\paragraph{À plus long terme — profilage du pipeline de rendu complet.}
+La question du coût de rendu complet (évaluation des expressions GraSyLa, pipeline graphique Eclipse) reste ouverte. Un profilage \emph{async-profiler} attaché à une instance Eclipse en cours d'exécution, sur un modèle BPMN de taille réaliste, permettrait de situer le dispatch et l'évaluation d'expressions dans le budget-temps total d'une frame de rendu, et d'identifier si des optimisations algorithmiques au niveau de l'interpréteur GraSyLa sont justifiées.
+
+Enfin, l'abandon de l'option sérialisation — remplacement de JPA par un format binaire personnalisé — mérite d'être mentionné comme alternative architecturale à long terme. Si MetaDONE devait évoluer vers des modèles de taille significativement plus grande, un mécanisme de persistance non relationnel pourrait lever le plancher $O(\log N)$ inhérent aux index B-tree. Ce choix impliquerait cependant une rupture partielle avec la portabilité multi-backend que le modèle JPA actuel assure.

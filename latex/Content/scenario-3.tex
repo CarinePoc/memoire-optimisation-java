@@ -1,0 +1,304 @@
+\newpage
+\section{Scénario 4 : Visualisation d'un (méta)modèle}
+\label{sec:scenario4}
+
+\subsection{Description du scénario}
+
+Ce scénario évalue les performances de la boucle de rendu GraSyLa : pour
+chaque objet d'un modèle concret, MetaDONE doit déterminer quelle équation
+du script s'applique à cet objet, puis évaluer son arbre d'expression pour
+produire le rendu graphique.
+
+La pipeline complète de visualisation comprend trois étapes successives :
+
+\begin{enumerate}
+  \item \textbf{Récupération des équations} —
+        \texttt{GrasylaScript.getEquations()} construit la liste des 106
+        équations disponibles.
+  \item \textbf{Dispatch} — pour chaque objet du modèle, identifier les
+        équations dont le \texttt{MetaObject} du membre gauche (LHS)
+        correspond au type de l'objet.
+  \item \textbf{Évaluation des expressions} — parcourir et interpréter
+        l'arbre d'expression (RHS) de chaque équation applicable pour
+        produire les composants graphiques.
+\end{enumerate}
+
+Le benchmark implémenté dans \texttt{ScenarioVisualization} couvre les
+étapes 1 et 2. L'étape 3 requiert la couche UI Eclipse (SWT, moteur
+de rendu SVG) et ne peut pas être isolée dans un test standalone~;
+son coût réel est quantifié a posteriori par un profilage live de
+l'application Eclipse complète (section~\ref{sec:sc4-live}).
+
+\subsection{Infrastructure de benchmark}
+
+Le script BPMN \texttt{bpmn\_mm.grasyla} (106 équations) est chargé en
+mémoire une seule fois en \texttt{@BeforeClass}. Quatre modèles concrets de
+taille croissante sont construits programmatiquement :
+$N \in \{50, 200, 500, 1\,000\}$ objets répartis en trois types BPMN
+(\texttt{Task}, \texttt{ExclusiveGateway}, \texttt{StartEvent}). Ces types
+ont été choisis pour leur profondeur de hiérarchie différente, représentative
+de l'hétérogénéité d'un vrai modèle.
+
+La mesure centrale est la boucle de dispatch naïve (Listing~\ref{ls-dispatch}).
+
+\begin{lstlisting}[language=Java,
+  caption={Boucle de dispatch naïve $O(N \times M)$},
+  label={ls-dispatch}]
+for (final ConcreteObject co : model.getDefinition()) {
+    for (final GrasylaEquation eq : equations) {
+        if (co.hasType(eq.getLHS().getMetaObject())) {
+            matches++;
+        }
+    }
+}
+\end{lstlisting}
+
+Cette boucle de complexité $O(N \times M)$ effectue $N \times M = N \times 106$
+appels à \texttt{hasType()}, où chaque appel vérifie si le
+\texttt{MetaObject} LHS de l'équation figure parmi les types (direct +
+supertypes) de l'objet.
+
+\subsection{Mécanisme de \texttt{hasType()} et rôle du cache JPA}
+
+Lorsqu'un objet est créé via \texttt{createObject(moTask)}, MetaDONE
+enregistre dans la table \texttt{NN\_typeof} une entrée pour le type direct
+et pour chacun de ses supertypes
+(\texttt{Activity}, \texttt{FlowNode}, \texttt{FlowElement},
+\texttt{BaseElement}, \texttt{InteractionNode}). Un objet \texttt{Task}
+dispose ainsi de $\sim$6 entrées \texttt{NN\_typeof}.
+
+La méthode \texttt{hasType(MetaObject)} dans \texttt{ConcreteObject\_impl}
+appelle \texttt{getTarget().getObjectTypes()}, qui itère la collection JPA
+\texttt{instanceOf} (\texttt{@OneToMany} sur \texttt{NN\_typeofJPA2}). Cette
+collection est chargée depuis la base lors du premier accès puis conservée
+dans l'identity map OpenJPA pour toute la durée de la session. Les appels
+suivants itèrent un \texttt{HashSet} Java en mémoire, sans aucune requête
+SQL.
+
+Il résulte de ce mécanisme que le coût d'un appel à \texttt{hasType()},
+bien que théoriquement $O(K)$ avec $K$ le nombre de supertypes, est en
+pratique de l'ordre de quelques dizaines de nanosecondes — le coût d'une
+itération en mémoire.
+
+\subsection{Résultats de référence}
+
+\begin{table}[h]
+\centering
+\caption{Résultats du benchmark de dispatch (médiane de 10 répétitions,
+mesures complètes en annexe~\ref{ann:mesures-s4}).}
+\label{tab:sc4-dispatch}
+\begin{tabular}{llrr}
+\hline
+\textbf{Phase} & \textbf{Paramètre} & \textbf{Médiane} & \textbf{CV} \\
+\hline
+t1 — \texttt{getEquations()} & 106 équations         & 3,70~ms & 8,4\,\% \\
+t2 — Dispatch                & $N = 50$ (650 m.)     & 1,32~ms & 15,8\,\% \\
+t3 — Dispatch                & $N = 200$ (2\,600 m.) & 4,00~ms & 8,5\,\% \\
+t4 — Dispatch                & $N = 500$ (6\,500 m.) & 8,71~ms & 11,8\,\% \\
+t5 — Dispatch                & $N = 1\,000$ (13\,000 m.) & 14,49~ms & 17,3\,\% \\
+\hline
+\end{tabular}
+\end{table}
+
+La constance du ratio $\text{matches}/N = 13$ confirme la cohérence du
+benchmark : chaque objet correspond à exactement 13 équations en moyenne,
+quelle que soit la taille du modèle.
+
+\subsection{Analyse}
+
+%\paragraph{Croissance sous-linéaire.}
+Le rapport des temps entre $N = 50$ et $N = 1\,000$ est de
+$14{,}49/1{,}32 \approx 11{,}0\times$, contre $20\times$ attendu pour une
+complexité strictement linéaire. Cet écart traduit l'effet du compilateur
+JIT de la JVM~: la première itération ($N = 50$, boucle froide) est
+exécutée en mode interprété, les suivantes bénéficient d'un code natif
+compilé. Le coût par objet passe de 26,4~µs à $N = 50$ à 14,5~µs à
+$N = 1\,000$ --- un facteur $\approx 1{,}8$ dû au seul chauffage JIT
+(tableau~\ref{tab:sc4-cout-unitaire}).
+
+\begin{table}[h]
+\centering
+\caption{Coût unitaire du dispatch en fonction de $N$ (calculé à partir
+des médianes du tableau~\ref{tab:sc4-dispatch}).}
+\label{tab:sc4-cout-unitaire}
+\begin{tabular}{rrrr}
+\hline
+\textbf{N} & \textbf{Temps total} &
+\textbf{Coût / objet} & \textbf{Coût / appel \texttt{hasType()}} \\
+\hline
+50     &  1,32~ms & 26,4~µs & 249~ns \\
+200    &  4,00~ms & 20,0~µs & 188~ns \\
+500    &  8,71~ms & 17,4~µs & 164~ns \\
+1\,000 & 14,49~ms & 14,5~µs & 137~ns \\
+\hline
+\end{tabular}
+\end{table}
+
+%\paragraph{\texttt{getEquations()} plus coûteux que le dispatch sur petits modèles.}
+Pour $N = 50$, la récupération des équations (3,70~ms) représente
+$\approx 2{,}8\times$ le temps de dispatch (1,32~ms). Cette méthode
+reconstruit à chaque appel 106 objets \texttt{GrasylaEquation} en relisant
+depuis JPA 4 propriétés et 2 rôles par équation. Si elle est appelée à
+chaque cycle de rendu --- ce qui est le cas en pratique --- elle constitue
+un surcoût fixe indépendant de la taille du modèle.
+
+%\paragraph{Pertinence des valeurs absolues.}
+Un diagramme BPMN réaliste contient 20 à 50 éléments. Pour $N = 50$, le
+dispatch complet (\texttt{getEquations} + boucle) prend moins de 5 ms, ce
+qui est négligeable dans un cycle de rendu complet. Les optimisations
+algorithmiques envisagées (mise en cache de \texttt{getEquations()}, index
+\texttt{Map<MetaObject, List<GrasylaEquation>>}) sont techniquement valides
+mais ne produiraient pas d'amélioration perceptible sur des modèles de
+taille courante.
+
+\subsection{Conclusion du benchmark standalone}
+
+Le benchmark standalone établit que le dispatch d'équations est déjà efficace
+dans MetaDONE~: le cache JPA absorbe intégralement le coût des accès type,
+ramenant chaque appel à \texttt{hasType()} à $\sim$137~ns à l'état chaud.
+Pour des modèles de taille réaliste ($N < 100$), le dispatch total reste
+inférieur à 5~ms, ce qui est négligeable dans un cycle de rendu complet.
+Le goulot de performance de la visualisation, s'il existe, se situe donc
+dans l'évaluation des arbres d'expression (étape~3 du pipeline) et le rendu
+graphique --- deux couches inaccessibles en mode standalone et qui font
+l'objet de la section suivante.
+
+\subsection{Profilage live de l'application Eclipse}
+\label{sec:sc4-live}
+
+Le benchmark standalone (sections précédentes) ne couvre que les étapes 1
+et 2 du pipeline de rendu. Pour mesurer l'étape 3 --- l'évaluation
+récursive des arbres d'expression et la construction des composants
+graphiques --- il faut accéder à la couche UI Eclipse où le moteur GraSyLa
+parcourt l'arbre des \texttt{ConcreteObject} liés par
+\texttt{bootsMR\_Contains}, résout les références MetaL$_2$, évalue les
+functors et compose les composants graphiques. Un profilage par
+échantillonnage a donc été réalisé sur l'application Eclipse en cours
+d'exécution à l'aide d'\emph{async-profiler}.
+
+\subsubsection{Protocole de mesure}
+
+Un script GraSyLa dédié, \texttt{petri\_benchmark.grasyla}, définit le
+métamodèle réseau de Petri (Place, Transition, arcs) et expose une action
+\texttt{doubleClick} créant 100 Places et 100 Transitions par appel, via la
+méthode \texttt{PetriDemo.createBenchmark()}. Le profilage suit la séquence
+suivante :
+
+\begin{enumerate}
+  \item lancement d'Eclipse, ouverture d'un modèle et association du script ;
+  \item attachement d'async-profiler au processus en cours :
+\begin{lstlisting}[language=bash, caption={Attachement d'async-profiler au JVM Eclipse}, label={ls-asprof}]
+jps -l | grep eclipse
+./asprof start -e cpu -i 5ms <PID>
+\end{lstlisting}
+  \item cinq doubles-clics successifs (création de $5 \times 200 = 1\,000$
+        éléments), entrecoupés de déplacements de quelques n\oe{}uds ;
+  \item fermeture des vues, puis arrêt et export du profil :
+\begin{lstlisting}[language=bash, caption={Arrêt du profilage et export du flamegraph}, label={ls-asprof-stop}]
+./asprof stop -f flame.html <PID>
+\end{lstlisting}
+\end{enumerate}
+
+Les options \texttt{-XX:+UnlockDiagnosticVMOptions} et
+\texttt{-XX:+DebugNonSafepoints} ont été ajoutées à \texttt{eclipse.ini} afin de
+permettre la capture de traces de pile précises dans le code compilé par le JIT.
+Le profil obtenu totalise \textbf{8\,444 échantillons CPU}.
+
+\subsubsection{Résultats}
+
+Le Tableau~\ref{tab:sc4-live} présente la part de chaque famille de méthodes,
+obtenue par recherche par expression régulière dans le flamegraph.
+
+\begin{table}[h]
+\centering
+\caption{Part du temps CPU par famille de méthodes (8\,444 échantillons)}
+\label{tab:sc4-live}
+\begin{tabular}{lr}
+\hline
+\textbf{Famille de méthodes (regexp)} & \textbf{\% CPU} \\
+\hline
+\texttt{Grasyla} (moteur GraSyLa, toutes méthodes)         & 88,56 \\
+\texttt{trigger} (propagation d'événements)                & 53,32 \\
+\texttt{buildNewComponent|buildComponent|buildChild}       & 53,21 \\
+\texttt{evaluateComponent}                                 & 53,20 \\
+\texttt{updateSceneChildren|GraphEngine}                   & 17,91 \\
+\texttt{getEquations|hasType} (dispatch, étapes 1--2)      & 11,16 \\
+\texttt{precondition\_createRole} (vérification DbC)        & 0,04 \\
+\texttt{GroovyClassLoader|parseClass} (compilation script) & 0,05 \\
+\hline
+\end{tabular}
+\end{table}
+
+\textit{Remarque de lecture :} les trois lignes \texttt{trigger},
+\texttt{buildComponent} et \texttt{evaluateComponent} affichent toutes
+$\approx 53\,\%$ parce qu'elles appartiennent à \emph{la même pile d'appel}
+(\texttt{trigger} $\rightarrow$ \texttt{buildComponent} $\rightarrow$
+\texttt{evaluateComponent}) ; ces valeurs ne s'additionnent pas.
+
+\subsubsection{Analyse}
+
+%\paragraph{Le moteur GraSyLa domine le profil.}
+Avec 88,56~\% du temps CPU, l'évaluation et la construction des composants
+graphiques (\texttt{GrasylaEngine}, \texttt{GraphEngine},
+\texttt{GrasylaScene}) constituent le goulot d'étranglement réel de la
+visualisation. Ce résultat confirme empiriquement l'hypothèse formulée au
+Scénario~4 : le coût de rendu réside dans l'étape~3 (évaluation des arbres
+d'expression), inaccessible en mode standalone.
+
+%\paragraph{Un rendu piloté par événements.}
+La création s'effectuant dans une vue \emph{ouverte}, chaque \texttt{createObject}
+émet un événement (\texttt{MetadoneEvents.trigger}) propagé par la tour
+d'événements (\texttt{EventTowerNormal.findSubscribers}) jusqu'au gestionnaire
+\texttt{GrasylaEngine\$ConcreteObjectChangeHandler}, qui reconstruit la scène.
+Ce mécanisme explique les $\approx 53\,\%$ passés dans la pile
+\texttt{trigger} $\rightarrow$ \texttt{buildComponent} $\rightarrow$
+\texttt{evaluateComponent} : la construction de $N$ objets dans une vue active
+engendre une reconstruction incrémentale à chaque insertion. C'est cette boucle
+de re-rendu événementiel, et non l'algorithme de dispatch, qui domine le coût
+perçu.
+
+%\paragraph{La précondition DbC n'est pas un goulot.}
+La vérification \texttt{precondition\_createRole} représente 0,04\,\% du temps
+CPU. Ce résultat conforte \emph{a posteriori} le rejet de la
+\textbf{candidate \og bypass-précondition \fg{}} étudiée au Scénario~2
+(section~\ref{sec:scenario2-precondition-rejet}, voir aussi
+chapitre~\ref{chap:discussion})~: le contournement de la précondition aurait
+violé le principe \emph{Design by Contract} pour un gain inférieur au bruit
+de mesure. De même, la compilation du script Groovy (0,05\,\%) est négligeable,
+le script n'étant compilé qu'une fois au chargement.
+
+%\paragraph{Le dispatch reste mesurable en contexte interactif.}
+À l'inverse des mesures standalone, où le dispatch était négligeable pour des
+modèles de taille réaliste, la famille \texttt{getEquations|hasType} représente
+ici 11,16~\% du temps CPU. Cet écart s'explique par le mécanisme de re-rendu :
+\texttt{getEquations()} et la sélection d'équation sont réinvoquées à chaque
+reconstruction déclenchée par un événement. Ce résultat valide \emph{a
+posteriori} la piste d'optimisation à court terme identifiée dans la discussion
+(Section~\ref{chap:discussion}) : la mise en cache de
+\texttt{GrasylaScript.getEquations()}, invalidée via \texttt{notifyScriptChanged()},
+éliminerait un surcoût fixe réinvoqué à chaque cycle de rendu.
+
+\subsection{Conclusion du Scénario~4}
+
+Le Scénario~4 combine deux niveaux d'analyse complémentaires. Le
+\textbf{benchmark standalone} a montré que le dispatch d'équations est
+déjà efficace en MetaDONE et reste négligeable sur des modèles de taille
+réaliste~; il a également exposé sa propre limite, à savoir l'impossibilité
+de mesurer l'évaluation des arbres d'expression sans la couche UI Eclipse.
+Le \textbf{profilage live} a comblé cette limite et identifié le goulot
+réel~: l'évaluation récursive des arbres d'expression GraSyLa concentre
+$\approx 88\,\%$ du temps CPU, le coût étant amplifié par le caractère
+événementiel du rendu --- toute modification du modèle dans une vue ouverte
+déclenche une reconstruction de la scène.
+
+Deux pistes d'optimisation se dégagent, par ordre de rapport gain/effort~:
+(i) la mise en cache de \texttt{GrasylaScript.getEquations()}, dont le
+surcoût mesuré atteint 11\,\% en contexte interactif, et (ii) une
+reconstruction incrémentale ciblée de la scène plutôt qu'une reconstruction
+globale à chaque événement. Ces pistes sont reprises dans le
+chapitre~\ref{chap:discussion}.
+
+Enfin, la précondition \emph{Design by Contract} de
+\texttt{precondition\_createRole} ne contribue pas mesurablement au coût
+(0,04\,\%), ce qui valide les arbitrages de conception retenus dans ce
+travail et confirme le rejet de la candidate \og bypass-précondition \fg{}.

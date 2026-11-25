@@ -1,0 +1,437 @@
+\subsection{Identification des goulots d'étranglement --- itération~2}
+\label{sec:scenario1-profil2}
+
+Après application des trois premières optimisations, une seconde session
+de profilage a été conduite selon le même protocole que la
+section~\ref{sec:scenario1-profil1}. Les figures~\ref{fig:jfr-2}
+et~\ref{fig:prof2-zoom} avaient déjà confirmé l'efficacité des
+corrections précédentes~: \texttt{findMetaObjectsInDefinition\_oneshot}
+n'apparaît plus de manière dominante dans le profil CPU. Un nouveau
+goulot d'étranglement émerge cependant, centré cette fois sur
+\texttt{\_isInDefinition} et ses appels à \texttt{getDomain}.
+
+% -----------------------------------------------
+\subsubsection{Profilage CPU}
+% -----------------------------------------------
+
+En se concentrant sur les méthodes les plus représentées dans le
+flamegraph post-optimisation~1--3, on obtient les pourcentages d'occupation
+CPU suivants lors du bootstrapping~:
+
+\begin{itemize}
+    \item \texttt{pcGetdeleted} --- 21,33\%
+    \item \texttt{check} --- 26,51\%
+    \item \texttt{getDomain} --- 37,59\%
+    \item \texttt{\_isInDefinition} / \texttt{isInDefinition} --- 37,23\%
+    \item \texttt{\_getName} --- 48,43\%
+    \item \texttt{getMOByName} --- 50,48\%
+\end{itemize}
+
+\texttt{getDomain} et \texttt{\_isInDefinition} apparaissent au même
+niveau de profondeur dans le flamegraph, ce qui indique que
+\texttt{getDomain} est appelé massivement \textit{depuis}
+\texttt{\_isInDefinition}. La nouvelle chaîne d'appels critique est~:
+\begin{center}
+\small
+\texttt{getMOByName} \\
+$\downarrow$ \\
+\texttt{\_getName}
+(\texttt{MetaObject\_impl},
+\texttt{metadone\_bundle\_metabusiness}) \\
+$\downarrow$ \\
+\texttt{isInDefinition} $\to$ \texttt{\_isInDefinition} 
+(\texttt{ConcreteModel\_impl},
+\texttt{metadone\_bundle\_metabusiness}) \\
+$\downarrow$ \\
+\texttt{getDomain} 
+(interface \texttt{K\_Property},
+\texttt{metadone\_bundle\_repository})
+\end{center}
+
+Notons que \texttt{getMOByName} et \texttt{\_getName} occupent toujours
+le haut du profil (48--50\%) non plus à cause de la précondition
+éliminée par l'optimisation~2, mais à cause du volume d'appels légitime
+qu'ils génèrent vers \texttt{isInDefinition}. Le goulot a donc migré
+d'un niveau vers le bas dans la pile d'appels.
+
+% -----------------------------------------------
+\subsubsection{Analyse statique et quantification}
+% -----------------------------------------------
+
+%\paragraph{Rôle de \texttt{\_isInDefinition}.}
+La méthode \texttt{\_isInDefinition} est définie dans
+\texttt{ConcreteModel\_impl} du bundle
+\texttt{metadone\_bundle\_metabusiness}. Elle répond à une question
+symétrique de \texttt{findMetaObjectsInDefinition\_oneshot}~: un
+\texttt{ConcreteObject} donné appartient-il à la définition de ce
+\texttt{ConcreteModel}~?
+
+Pour le comprendre, il faut rappeler comment l'appartenance d'un objet
+concret à un modèle est encodée dans le kernel: de même qu'un \texttt{MetaDef} relie un
+\texttt{MetaObject} à son \texttt{MetaModel} via une \texttt{K\_Property}
+de type \texttt{def\_pt}, un \texttt{ConcreteDef} relie un
+\texttt{ConcreteObject} à son \texttt{ConcreteModel} par la même
+structure. La méthode itère donc sur l'ensemble des \texttt{K\_Property}
+dont \texttt{this} est le range via \texttt{getTarget().getRangeOf()}, et
+pour chaque candidat, vérifie deux conditions~: que son domaine est bien
+l'objet recherché (\texttt{candidate.getDomain() == kmember}), et que son
+type de propriété est \texttt{def\_pt} (\texttt{someParentIsDef}).
+Il s'agit d'une \textbf{recherche linéaire $O(n)$}, où $n$ est le nombre
+de propriétés dont le \texttt{ConcreteModel} est le range.
+
+\begin{lstlisting}[
+  caption={\texttt{\_isInDefinition} --- classe \texttt{ConcreteModel\_impl},
+  bundle \texttt{metadone\_bundle\_metabusiness}. Recherche linéaire $O(n)$
+  sur les \texttt{K\_Property} du range~: chaque itération appelle
+  \texttt{getDomain()} (interface \texttt{K\_Property},
+  bundle \texttt{metadone\_bundle\_repository}).},
+  label={ls-isinDefinition}]
+private boolean _isInDefinition(ConcreteObject_impl member) {
+    try {
+        final K_Object kmember = member.getTarget();
+        for (final K_Property candidate :
+                getTarget().getRangeOf()) {
+            if (candidate.getDomain() == kmember
+                    && someParentIsDef(candidate)) {
+                return true;
+            }
+        }
+        return false;
+    } catch (final BadFacet e) {
+        throw new Metal2Exception(e);
+    } catch (final BadPreCondition e) {
+        throw new Metal2Exception(e);
+    }
+}
+\end{lstlisting}
+
+%\paragraph{Source de l'amplification.}
+Rappelons que \texttt{\_getName} (section~\ref{sec:opti-metamodel},
+optimisation~2) parcourt les \texttt{ConcreteProperty<String>} associées
+au \texttt{MetaObject} et appelle \texttt{concreteModel.isInDefinition(cp)}
+pour chacune afin de déterminer si la propriété de nom appartient au bon
+\texttt{ConcreteModel} (Listing~\ref{ls--getname}, ligne~378). Chaque
+appel à \texttt{isInDefinition} déclenche un scan complet via
+\texttt{\_isInDefinition}. Si la propriété n'est pas trouvée dans le
+\texttt{MetaModel} courant, \texttt{\_getName} remonte récursivement dans
+ses supertypes directs (ligne~383), multipliant encore le nombre d'appels.
+
+L'instrumentation confirme cette amplification~: pour
+\textbf{1~700~appels} à \texttt{\_getName}, on dénombre plus de
+\textbf{74~000~appels} à \texttt{\_isInDefinition}, soit un
+\textbf{facteur multiplicatif moyen de 43}. Ce ratio est du même ordre
+que le facteur~57 observé à la section~\ref{sec:scenario1-profil1}~: la
+structure du problème est identique --- une boucle externe génère une
+amplification quadratique via une recherche linéaire interne --- mais le
+point d'application s'est déplacé d'un niveau vers le bas dans la pile
+d'appels, de \texttt{MetaModel\_impl} vers \texttt{ConcreteModel\_impl}.
+
+%\paragraph{Parallèle avec le problème précédent.}
+Le schéma identifié ici est la réplique exacte de celui de
+l'itération~1 (section~\ref{sec:scenario1-profil1}), mais opérant
+cette fois sur le niveau concret (M1) de MetaL$_2$ plutôt que sur
+son niveau méta-modèle (M2/M3)~:
+
+\begin{center}
+\small
+\begin{tabular}{lll}
+\hline
+\textbf{Dimension} & \textbf{Itération~1} & \textbf{Itération~2} \\
+\hline
+Niveau (dans MetaL$_2$) & Méta-modèle (M2/M3) & Concret (M1) \\
+Classe & \texttt{MetaModel\_impl} & \texttt{ConcreteModel\_impl} \\
+Méthode centrale & \texttt{\_hasInItsDefinition} &
+\texttt{\_isInDefinition} \\
+Scan interne & \texttt{findMetaObjectsInDefinition\_oneshot} &
+\texttt{\_isInDefinition} elle-même \\
+Opération de base & \texttt{getRangeOf(def\_pt)} & \texttt{getRangeOf()} \\
+Facteur d'amplification & $\sim$57 & $\sim$43 \\
+\hline
+\end{tabular}
+\end{center}
+
+Cette récurrence est la conséquence directe de la symétrie réflexive
+entre les niveaux méta et concret de MetaL$_2$, documentée à la
+section~\ref{sec:reflexivite-intro}~: \texttt{MetaModel} et
+\texttt{ConcreteModel} reposent tous deux sur le substrat uniforme
+de \texttt{DataObject} (MetaL$_1$, bundle \texttt{repository}) et
+encodent l'appartenance de la même manière. Les algorithmes qui la
+vérifient partagent donc la même structure et les mêmes
+vulnérabilités. La solution sera également symétrique~: l'introduction
+d'un cache dans \texttt{ConcreteModel\_impl}, à l'image de ce qui a
+été fait dans \texttt{MetaModel\_impl}.
+
+% -----------------------------------------------
+\subsubsection{Synthèse du diagnostic}
+% -----------------------------------------------
+
+Le goulot résiduel identifié après la première itération d'optimisation est
+analogue à celui de l'itération~1, mais opère au niveau concret (M1) de
+MetaL$_2$.
+La pile d'appels problématique est~:
+
+\begin{center}
+\small
+\texttt{ConcreteModel\_impl.\_isInDefinition} \\
+(itération $O(n)$ sur toutes les \texttt{K\_Property} du range) \\[4pt]
+$\downarrow$ \\[4pt]
+\texttt{K\_Property.getDomain} ---
+\texttt{metadone\_bundle\_repository} \\
+(accès au dépôt JPA à chaque itération)
+\end{center}
+
+La mitigation naturelle est identique à celle de l'itération~1~: la
+mémoïsation des résultats via un cache. Dans
+\texttt{ConcreteModel\_impl}, l'appartenance d'un
+\texttt{ConcreteObject} à un \texttt{ConcreteModel} est une information
+qui change rarement une fois le modèle construit~; elle est un candidat
+idéal pour la mise en cache. La phase d'optimisation suivante développe
+cette stratégie.
+
+\subsection{Optimisation --- itération~2}
+\label{sec:scenario1-opti2}
+
+\subsubsection{Optimisation~4 : cache d'appartenance dans
+\texttt{ConcreteModel\_impl}}
+\label{sec:opti4}
+
+%\paragraph{Principe.}
+Le diagnostic de la section~\ref{sec:scenario1-profil2} a mis en évidence
+que \texttt{\_isInDefinition} était appelée 74~000 fois pour seulement
+1~700~appels à \texttt{\_getName}, et que chaque appel déclenchait un scan
+linéaire complet via \texttt{getRangeOf()} et \texttt{getDomain()} dans
+le bundle \texttt{metadone\_bundle\_repository}. Le correctif introduit un cache
+d'appartenance directement dans \texttt{ConcreteModel\_impl}
+(\texttt{metadone\_bundle\_metabusiness}), afin que chaque paire
+(\texttt{ConcreteModel}, \texttt{ConcreteObject}) ne soit scannée qu'une
+seule fois.
+
+Cette approche est la réplique exacte, au niveau concret (M1) de
+MetaL$_2$, du mécanisme de \texttt{CacheCallFunction} utilisé dans
+\texttt{MetaModel\_impl} pour \texttt{\_hasInItsDefinition}
+(optimisations~1 et~3, section~\ref{sec:opti-metamodel}). La symétrie
+réflexive entre les niveaux méta et concret de MetaL$_2$, documentée
+à la section~\ref{sec:reflexivite-intro}, se retrouve ici dans la
+solution autant que dans le problème.
+
+%\paragraph{Structure du cache.}
+Le cache est déclaré comme champ d'instance \texttt{private final} de
+\texttt{ConcreteModel\_impl}~:
+
+\begin{lstlisting}[firstnumber=42,
+  caption={Déclaration du cache dans \texttt{ConcreteModel\_impl} ---
+  bundle \texttt{metadone\_bundle\_metabusiness}.},
+  label={ls-cache-isin}]
+private final Map<ConcreteObject_impl, Boolean>
+    cache_isInDefinition =
+        new WeakHashMap<ConcreteObject_impl, Boolean>();
+\end{lstlisting}
+
+Le choix d'un \texttt{WeakHashMap} est délibéré et cohérent avec celui
+fait pour le cache de proxies dans \texttt{FactoryOfProxy}~: les clés sont des références faibles vers
+les \texttt{ConcreteObject\_impl}. Lorsqu'un objet n'est plus référencé
+ailleurs dans la JVM, il peut être collecté par le ramasse-miettes sans
+que le cache ne l'en empêche, et l'entrée correspondante disparaît
+automatiquement. Cela évite toute fuite mémoire dans un système où les
+objets concrets peuvent être supprimés à l'exécution via
+\texttt{removeFromDefinition}.
+
+Par ailleurs, le cache mémorise les \textbf{deux résultats possibles}
+(\texttt{true} et \texttt{false})~: il évite ainsi de rescanner pour
+des objets dont l'absence est déjà connue, ce qui est important dans les
+appels de vérification défensifs effectués avant un ajout.
+
+%\paragraph{Logique de consultation.}
+La méthode \texttt{\_isInDefinition} réécrite est présentée au
+Listing~\ref{ls-isinDefinition-cache}. Elle consulte désormais le
+cache avant tout accès au repository~: en cas de succès
+(\textit{cache hit}), la réponse est retournée en $O(1)$~; en cas
+d'échec (\textit{cache miss}), le scan $O(n)$ est effectué et son
+résultat --- positif ou négatif --- est mémorisé avant d'être
+retourné.
+
+\begin{lstlisting}[language=Java, firstnumber=141,
+  caption={\texttt{\_isInDefinition} après l'optimisation~4 ---
+  classe \texttt{ConcreteModel\_impl},
+  bundle \texttt{metadone\_bundle\_metabusiness}. Le cache est
+  consulté avant tout scan~; les deux résultats (positif et
+  négatif) sont mémorisés.},
+  label={ls-isinDefinition-cache}]
+private boolean _isInDefinition(ConcreteObject_impl member) {
+    try {
+        // Check cache first
+        Boolean cached = cache_isInDefinition.get(member);
+        if (cached != null) {
+            return cached;
+        }
+
+        // Cache miss: perform the scan
+        final K_Object kmember = member.getTarget();
+        for (final K_Property candidate : getTarget().getRangeOf()) {
+            if (candidate.getDomain() == kmember
+                    && someParentIsDef(candidate)) {
+                cache_isInDefinition.put(member, true);
+                return true;
+            }
+        }
+
+        // Not found: store false and return
+        cache_isInDefinition.put(member, false);
+        return false;
+    } catch (final BadFacet e) {
+        throw new Metal2Exception(e);
+    } catch (final BadPreCondition e) {
+        throw new Metal2Exception(e);
+    }
+}
+\end{lstlisting}
+
+Notons que le gain de performance attendu ne porte pas sur le nombre
+d'invocations de \texttt{\_isInDefinition} --- qui reste identique
+puisque les call sites en amont (\texttt{\_getName} en particulier)
+ne sont pas modifiés --- mais sur le \textbf{coût unitaire} de chaque
+appel~: ce qui était auparavant un scan $O(n)$ du graphe devient,
+dans la majorité des cas, un accès $O(1)$ à la \texttt{WeakHashMap}.
+La mesure pertinente du gain est donc le temps mural, analysé à la
+section~\ref{sec:scenario1-tests2}.
+
+%\paragraph{Cohérence du cache lors des mutations.}
+Deux méthodes modifient la définition d'un \texttt{ConcreteModel} et
+doivent maintenir la cohérence du cache~:
+
+\begin{itemize}
+    \item \texttt{\_addInDefinition} insère directement \texttt{true}
+    dans le cache après l'ajout. Cela évite qu'un appel immédiat à
+    \texttt{\_isInDefinition} ne déclenche un scan inutile pour un objet
+    dont on vient d'établir l'appartenance --- comportement analogue à la
+    mise à jour incrémentale de l'optimisation~3
+    (section~\ref{sec:opti-metamodel}).
+
+    \item \texttt{removeFromDefinition} invalide l'entrée via
+    \texttt{cache\_isInDefinition.remove(member)} après suppression. Au
+    prochain appel, \texttt{\_isInDefinition} effectuera un scan et
+    constatera l'absence, qu'elle mettra alors en cache avec
+    \texttt{false}.
+\end{itemize}
+
+Le cache étant de portée instance, chaque \texttt{ConcreteModel\_impl}
+maintient son propre état d'appartenance indépendamment des autres
+modèles, ce qui est cohérent avec la sémantique de
+\texttt{isInDefinition}~: un même \texttt{ConcreteObject} peut appartenir
+à plusieurs \texttt{ConcreteModel} simultanément
+(comportement par défaut lorsque la propriété
+\texttt{canNotBeShared} de \texttt{MetaDef} n'est pas activée~;
+cf.~section~\ref{sec:metal2}).
+
+%\paragraph{Impact sur la complexité.}
+Avant l'optimisation, chaque appel à \texttt{\_isInDefinition} coûtait
+$O(n)$ où $n$ est le nombre de \texttt{K\_Property} dans le range du
+\texttt{ConcreteModel}. Après l'optimisation, le coût est $O(1)$ pour
+toute requête déjà vue, et $O(n)$ uniquement lors du premier scan pour
+chaque paire (\texttt{ConcreteModel}, \texttt{ConcreteObject}). Dans le
+contexte de \texttt{\_getName}, qui interroge les mêmes propriétés de
+nom de manière répétitive lors du bootstrapping, le nombre de scans
+effectifs tend vers $O(k)$ où $k$ est le nombre de paires distinctes
+plutôt que vers $O(n \times \text{appels})$.
+
+% -------------------------------------------------------------------
+\subsection{Tests de performance --- itération~2}
+\label{sec:scenario1-tests2}
+% -------------------------------------------------------------------
+
+\subsubsection{Bilan du second cycle d'optimisation}
+
+Le tableau~\ref{tab:bilan-opti2} synthétise les gains cumulés à l'issue
+des deux cycles d'optimisation.
+
+\begin{table}[h]
+\centering
+\caption{Bilan cumulé des deux cycles d'optimisation ---
+scénario d'initialisation. Les médianes sont calculées sur 10~répétitions
+(mesures complètes en annexe~\ref{ann:mesures-s1-a}).}
+\label{tab:bilan-opti2}
+\begin{tabular}{lrrr}
+\hline
+\textbf{Indicateur} & \textbf{Baseline} & \textbf{Après~1--3} &
+\textbf{Après~1--4} \\
+\hline
+Temps de démarrage (médiane, ms) & 18\,198 & 4\,516 & 1\,490 \\
+Facteur cumulé & --- & $\times$\,4,0 & $\times$\,12,2 \\
+Complexité (appartenance, niveau méta) & $O(n^2 \cdot s)$ & $O(n^2)$ & $O(n^2)$ \\
+Complexité (appartenance, niveau concret) & $O(n^2)$ & $O(n^2)$ &
+$O(n \cdot k)$ \\
+\hline
+\end{tabular}
+\end{table}
+
+Le passage de $\times$\,4,0 à $\times$\,12,2 illustre l'effet
+multiplicateur d'une optimisation portant sur le coût unitaire dans une
+boucle déjà serrée par les cycles précédents~: une fois la redondance
+structurelle éliminée (iter.~1), même un cache à coût quasi-nul produit
+un gain important.
+
+% -------------------------------------------------------------------
+\subsection{Synthèse du scénario~1}
+\label{sec:scenario1-synthese}
+% -------------------------------------------------------------------
+
+Le scénario d'initialisation a permis d'identifier et de résoudre deux
+familles de goulots d'étranglement successives, toutes deux enracinées
+dans la même propriété architecturale de MetaDONE~: l'encodage uniforme
+de l'appartenance et du typage dans un graphe homogène de
+\texttt{DataObject}.
+
+La première famille (optimisations~1--3) portait sur le niveau
+méta-modèle (M2/M3) de MetaL$_2$~: le cache de \texttt{MetaModel\_impl}
+était structurellement inopérant, transformant une vérification
+d'appartenance $O(1)$ en un scan $O(n)$ répété, lui-même amplifié d'un
+facteur~57 par la boucle de \texttt{getMOByName}. La complexité
+effective du bootstrapping était $O(n^3)$.
+
+La seconde famille (optimisation~4) portait sur le niveau concret
+(M1) de MetaL$_2$~: la symétrie réflexive entre les deux niveaux
+s'est retrouvée dans le problème lui-même.
+\texttt{\_isInDefinition} dans \texttt{ConcreteModel\_impl}
+reproduisait exactement le même antipattern, avec un facteur
+d'amplification de~43.
+
+Ces deux familles partagent une cause commune~: l'absence de mémoïsation
+sur des résultats stables. Les \texttt{DataObject} d'un projet MetaDONE
+sont majoritairement en lecture une fois le bootstrapping achevé~; le
+coût de maintien des caches (invalidation sur mutation, mise à jour
+incrémentale sur ajout) est donc faible comparé au gain sur les accès.
+Cette observation est cohérente avec les recommandations générales de la
+littérature sur les applications à forte intensité de lecture sur des
+graphes~\cite{oaks2014java, fowler2002patterns}.
+
+Les quatre optimisations sont ciblées, non invasives et n'affectent
+pas les contrats publics des interfaces de MetaL$_2$ (aux deux
+niveaux méta et concret)~: elles opèrent exclusivement dans les
+classes \texttt{*\_impl} du bundle \texttt{metadone\_bundle\_metabusiness},
+sans modifier le bundle \texttt{repository} qui implémente MetaL$_1$,
+ni les interfaces exposées aux plugins.
+
+\paragraph{Confrontation à l'hypothèse initiale.}
+L'hypothèse formulée en méthodologie (section~\ref{sec:scenarios})
+selon laquelle cette phase d'initialisation souffrirait du problème
+du N+1 et des limites du \emph{lazy loading} n'a pas été validée par
+les mesures~: les goulots identifiés (familles~1 et~2 ci-dessus) sont
+strictement CPU-bound et algorithmiques. Aucune des chaînes d'appels
+critiques ne déclenche d'accès supplémentaires à la base de données
+au-delà du chargement initial~; les boucles linéaires problématiques
+opèrent toutes sur des collections JPA déjà chargées dans l'identity
+map. Le surcoût JPA effectif, mesurable mais minoritaire après
+optimisations (\texttt{pcGetdeleted} et \texttt{getRangeOf} ci-dessous),
+n'affecte pas la conclusion principale.
+
+\paragraph{Limites et goulots résiduels.}
+\texttt{pcGetdeleted} et \texttt{getRangeOf} conservent une présence
+non négligeable dans les profils post-optimisation. Ces méthodes
+appartiennent au bundle \texttt{metadone\_bundle\_repository\_jpa2} et
+reflètent le coût intrinsèque des accès à la base de données via OpenJPA,
+indépendamment des caches applicatifs. Leur réduction nécessiterait
+d'agir à un niveau différent~: stratégie de chargement JPA (batch
+fetching, eager vs. lazy), indexation de la colonne \texttt{range} dans
+le schéma relationnel, ou remplacement partiel des requêtes par des
+structures en mémoire. Ces pistes constituent les axes d'investigation
+des scénarios suivants.

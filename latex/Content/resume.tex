@@ -1,0 +1,31 @@
+\noindent\textbf{\huge Résumé}
+\bigskip
+
+\begin{quote}
+MetaDONE est un outil MetaCASE bâti sur l'architecture MetaL$_2$ et reposant sur une couche de persistance JPA. Ce mémoire étudie empiriquement les performances de MetaDONE afin d'identifier ses goulots d'étranglement et de proposer des optimisations algorithmiques compatibles avec ses principes architecturaux, en particulier le Design by Contract.
+
+Quatre scénarios couvrant la construction de métamodèles, le chargement de scripts GraSyLa, la boucle de dispatch de visualisation et la scalabilité de la création de modèles concrets ont été conçus, instrumentés et mesurés. Pour chaque scénario, l'analyse a suivi un cycle complet : benchmark, identification de la cause racine, conception d'une optimisation, validation expérimentale du gain.
+
+Deux optimisations algorithmiques ont été retenues : la mise en cache de la vérification d'appartenance dans \texttt{ConcreteModel\_impl}, ramenant la construction de métamodèles de $O(N^2)$ à $O(N)$, et la correction d'une asymétrie de conception dans \texttt{\_createRole}, ramenant la création d'arcs de $O(N^2)$ à un plancher proche de $O(N \log N)$, avec un gain médian de $4{,}39\times$ à $N = 5\,000$. Deux autres optimisations ont été rejetées sur la base des mesures : l'une sans effet sur le backend utilisé, l'autre violant le principe Design by Contract. Un profilage live de l'application Eclipse complète l'analyse en quantifiant le coût réel du pipeline de visualisation.
+
+Ce travail montre qu'un gain substantiel de performance est compatible avec le respect des principes architecturaux de l'outil, à condition d'exploiter les invariants du système plutôt que de les contourner.
+\end{quote}
+\bigskip
+\noindent\textbf{Mots-clés} : MetaDONE, MetaCASE, méta-modélisation, optimisation de performance, complexité algorithmique, Design by Contract, profilage, JPA, benchmark
+
+\vspace{0.75cm}
+
+\noindent\textbf{\huge Abstract}
+\bigskip
+
+\begin{quote}
+MetaDONE is a MetaCASE tool built on the MetaL$_2$ architecture and relying on a JPA persistence layer. This dissertation empirically investigates the performance of MetaDONE in order to identify its bottlenecks and to propose algorithmic optimisations compatible with its architectural principles, in particular Design by Contract.
+
+Four scenarios covering metamodel construction, GraSyLa script loading, the visualisation dispatch loop and the scalability of concrete model creation were designed, instrumented and measured. Each scenario followed a complete cycle: benchmark, root-cause identification, optimisation design, experimental validation of the gain.
+
+Two algorithmic optimisations were retained: caching the definition-membership check in \texttt{ConcreteModel\_impl}, reducing metamodel construction from $O(N^2)$ to $O(N)$, and correcting a design asymmetry in \texttt{\_createRole}, reducing role creation from $O(N^2)$ to a floor close to $O(N \log N)$, with a median gain of $4{.}39\times$ at $N = 5\,000$. Two further candidates were rejected on the basis of measurements: one had no effect on the chosen backend, the other violated the Design by Contract principle. A live profiling session of the Eclipse application complements the analysis by quantifying the actual cost of the visualisation pipeline.
+
+This work demonstrates that substantial performance gains are compatible with the architectural principles of the tool, provided that system invariants are exploited rather than circumvented.
+\end{quote}
+\bigskip
+\noindent\textbf{Keywords} : MetaDONE, MetaCASE, metamodelling, performance optimisation, algorithmic complexity, Design by Contract, profiling, JPA, benchmark
