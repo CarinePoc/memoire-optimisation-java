@@ -34,4 +34,4 @@ Java, JPA, JFR (Java Flight Recorder), JMC (Java Mission Control), async-profile
 
 ## Contact
 
-Carine Pochet : linkedin.com/in/carine-pochet-91754533b · carinepochet@icloud.com
+Carine Pochet : [LinkedIn](linkedin.com/in/carine-pochet-91754533b) · carinepochet@icloud.com
